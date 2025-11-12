@@ -8,7 +8,7 @@ dependencies = [
     "ai-edge-litert==1.3.0",
     "fxpmath>=0.4.9",
     "numpy>=1.26.4",
-    "pyrtl>=0.12",
+    "pyrtl",
     "tensorflow>=2.18.1",
     "tensorflow-model-optimization>=0.8.0",
     "tf-keras>=2.18.0",
@@ -71,3 +71,6 @@ ignore = [
     # Docstring/comment contains ambiguous <unicode>
     "RUF002", "RUF003",
 ]
+
+[tool.uv.sources]
+pyrtl = { git = "https://github.com/gaborszita/pyrtl.git", rev = "pyrtlfloat" }

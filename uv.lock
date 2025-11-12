@@ -767,12 +767,8 @@ wheels = [
 
 [[package]]
 name = "pyrtl"
-version = "0.12"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/17/8a/e1385ae77fceb2e919fb82de24766f9f21f3ed2a5b626842a4b82642a79b/pyrtl-0.12.tar.gz", hash = "sha256:6673adeaf7ce901f58f8062e0c31f0d7457de1fec9a65bf9be6b1b56577361ac", size = 527009, upload-time = "2025-07-28T17:00:27.831Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/d9/d7/041a0cbb31cb4e9dde7fb343ac36e5bf6d5dbe619502e21fe9734f5963c3/pyrtl-0.12-py3-none-any.whl", hash = "sha256:f12d55f620a105c32720166dddf08f2a7077621c17a95e9f787c5d41f92d1418", size = 195198, upload-time = "2025-07-28T17:00:26.23Z" },
-]
+version = "0.1.dev1786+g15ad9965c"
+source = { git = "https://github.com/gaborszita/pyrtl.git?rev=pyrtlfloat#15ad9965cd7dcecd2d43ebdb9d60e6fd2f830046" }
 
 [[package]]
 name = "pyrtlnet"
@@ -806,7 +802,7 @@ requires-dist = [
     { name = "ai-edge-litert", specifier = "==1.3.0" },
     { name = "fxpmath", specifier = ">=0.4.9" },
     { name = "numpy", specifier = ">=1.26.4" },
-    { name = "pyrtl", specifier = ">=0.12" },
+    { name = "pyrtl", git = "https://github.com/gaborszita/pyrtl.git?rev=pyrtlfloat" },
     { name = "tensorflow", specifier = ">=2.18.1" },
     { name = "tensorflow-model-optimization", specifier = ">=0.8.0" },
     { name = "tf-keras", specifier = ">=2.18.0" },
