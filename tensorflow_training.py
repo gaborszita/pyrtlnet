@@ -5,7 +5,7 @@ import random
 import numpy as np
 import tensorflow as tf
 
-from pyrtlnet.inference_util import quantized_model_prefix
+from pyrtlnet.inference_util import quantized_model_prefix, unquantized_model_prefix
 from pyrtlnet.mnist_util import load_mnist_images
 from pyrtlnet.tensorflow_training import (
     evaluate_model,
@@ -31,12 +31,15 @@ def main() -> None:
     learning_rate = 0.001
     epochs = 10
 
+    model_prefix = pathlib.Path(args.tensor_path) / unquantized_model_prefix
+
     print("Training unquantized model.")
     model = train_unquantized_model(
         learning_rate=learning_rate,
         epochs=epochs,
         train_images=train_images,
         train_labels=train_labels,
+        unquantized_model_prefix=model_prefix,
     )
     print("Evaluating unquantized model.")
     evaluate_model(model=model, test_images=test_images, test_labels=test_labels)

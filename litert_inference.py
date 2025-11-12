@@ -9,6 +9,7 @@ from pyrtlnet.inference_util import (
     display_image,
     display_outputs,
     quantized_model_prefix,
+    unquantized_model_prefix
 )
 from pyrtlnet.litert_inference import load_tflite_model, run_tflite_model
 
@@ -39,7 +40,7 @@ def main() -> None:
     test_images = mnist_test_data.get("test_images")
     test_labels = mnist_test_data.get("test_labels")
 
-    tflite_file = pathlib.Path(args.tensor_path) / f"{quantized_model_prefix}.tflite"
+    tflite_file = pathlib.Path(args.tensor_path) / f"{unquantized_model_prefix}.tflite"
     if not tflite_file.exists():
         sys.exit(f"{tflite_file} not found. Run tensorflow_training.py first.")
     interpreter = load_tflite_model(quantized_model_name=tflite_file)

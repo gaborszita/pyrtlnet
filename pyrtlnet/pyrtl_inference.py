@@ -18,7 +18,7 @@ import pyrtl
 
 import pyrtlnet.pyrtl_axi as pyrtl_axi
 import pyrtlnet.pyrtl_matrix as pyrtl_matrix
-from pyrtlnet.inference_util import SavedTensors
+from pyrtlnet.inference_util import SavedTensors, SavedTensorsFloat
 from pyrtlnet.wire_matrix_2d import WireMatrix2D
 
 
@@ -30,11 +30,12 @@ class PyRTLInference:
 
     def __init__(
         self,
-        quantized_model_name: str,
+        model_name: str,
         input_bitwidth: int,
         accumulator_bitwidth: int,
         axi: bool,
         initial_delay_cycles: int = 0,
+        quantized: bool = True,
     ) -> None:
         """Convert the quantized model to PyRTL inference hardware.
 
@@ -137,11 +138,18 @@ class PyRTLInference:
         self.accumulator_bitwidth = accumulator_bitwidth
         self.axi = axi
         self.initial_delay_cycles = initial_delay_cycles
+        self.quantized = quantized
 
-        saved_tensors = SavedTensors(quantized_model_name)
-        self.input_scale = saved_tensors.input_scale
-        self.input_zero = saved_tensors.input_zero
-        self.layer = saved_tensors.layer
+        if self.quantized:
+            saved_tensors = SavedTensors(model_name)
+            self.input_scale = saved_tensors.input_scale
+            self.input_zero = saved_tensors.input_zero
+            self.layer = saved_tensors.layer
+        else:
+            saved_tensors = SavedTensorsFloat(model_name)
+            self.input_scale = None
+            self.input_zero = None
+            self.layer = saved_tensors.layer
 
         # Create the MemBlock for the input image data.
         self._make_input_memblock()
@@ -208,6 +216,7 @@ class PyRTLInference:
             input_bitwidth=self.input_bitwidth,
             accumulator_bitwidth=self.accumulator_bitwidth,
             initial_delay_cycles=self.initial_delay_cycles,
+            quantized=self.quantized,
         )
 
         # Create a WireMatrix2D for the layer's bias.
@@ -223,6 +232,7 @@ class PyRTLInference:
             a=product,
             b=bias_matrix,
             output_bitwidth=self.accumulator_bitwidth,
+            quantized=self.quantized,
         )
 
         # Perform ReLU, if the layer needs it. This is a 32-bit ReLU.
@@ -231,17 +241,20 @@ class PyRTLInference:
         else:
             relu = sum
 
-        # Normalize from 32-bit to 8-bit. This effectively multiplies the layer's output
-        # by its scale factor `m` and adds its zero point `z3`. `m` is represented as
-        # a fixed-point multiplier `m0` and a right shift `n`.
-        output = pyrtl_matrix.make_elementwise_normalize(
-            name=layer_name,
-            a=relu,
-            m0=self.layer[layer_num].m0,
-            n=self.layer[layer_num].n,
-            z3=self.layer[layer_num].zero,
-            output_bitwidth=self.input_bitwidth,
-        )
+        if self.quantized:
+            # Normalize from 32-bit to 8-bit. This effectively multiplies the layer's output
+            # by its scale factor `m` and adds its zero point `z3`. `m` is represented as
+            # a fixed-point multiplier `m0` and a right shift `n`.
+            output = pyrtl_matrix.make_elementwise_normalize(
+                name=layer_name,
+                a=relu,
+                m0=self.layer[layer_num].m0,
+                n=self.layer[layer_num].n,
+                z3=self.layer[layer_num].zero,
+                output_bitwidth=self.input_bitwidth,
+            )
+        else:
+            output = relu
 
         # Create pyrtl.Outputs for the layer's output. These can be inspected with
         # output.inspect().
@@ -261,13 +274,13 @@ class PyRTLInference:
         )
 
         layer1 = self._make_layer(
-            layer_num=1, input=layer0, input_zero=self.layer[0].zero, relu=False
+            layer_num=1, input=layer0, input_zero=self.layer[0].zero if self.quantized else None, relu=False
         )
 
         self.layer_outputs = [layer0, layer1]
 
         # Compute argmax for the last layer's output.
-        argmax = pyrtl_matrix.make_argmax(a=layer1)
+        argmax = pyrtl_matrix.make_argmax(a=layer1, quantized=self.quantized)
 
         num_rows, num_columns = layer1.shape
         assert num_columns == 1
@@ -331,9 +344,12 @@ class PyRTLInference:
         #
         # Adding input_zero_point (-128) effectively converts the uint8 image data to
         # int8, by shifting the range [0, 255] to [-128, 127].
-        flat_image = np.reshape(
-            test_image / self.input_scale + self.input_zero, newshape=input_shape
-        ).astype(np.int8)
+        if self.quantized:
+            flat_image = np.reshape(
+                test_image / self.input_scale + self.input_zero, newshape=input_shape
+            ).astype(np.int8)
+        else:
+            flat_image = np.reshape(test_image, newshape=input_shape).view(np.int32)
 
         # Convert the flattened image data to a dictionary for use in Simulation's
         # `memory_value_map`. The `flat_image` is transposed because this data will be
@@ -458,8 +474,8 @@ class PyRTLInference:
             # Read the argmax via AXI-Lite. The sum is stored in AXI register 0.
             argmax = pyrtl_axi.simulate_axi_lite_read(sim, provided_inputs, address=0)
         else:
-            layer0_output = self.layer_outputs[0].inspect(sim=sim).astype(np.int8)
-            layer1_output = self.layer_outputs[1].inspect(sim=sim).astype(np.int8)
+            layer0_output = self.layer_outputs[0].inspect(sim=sim).astype('int32').view('float32')
+            layer1_output = self.layer_outputs[1].inspect(sim=sim).astype('int32').view('float32')
 
             argmax = sim.inspect("argmax")
 
@@ -504,5 +520,7 @@ class PyRTLInference:
         for mem_write in gate_graph.mem_writes:
             for arg in mem_write.args:
                 assert arg.op in "Cr", f"ERROR: async write arg {mem_write}"
+        
+        #sim.tracer.render_trace(symbol_len=1, trace_list=["layer0_matmul.left[0]"])
 
         return layer0_output, layer1_output, argmax

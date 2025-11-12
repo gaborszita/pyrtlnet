@@ -22,6 +22,8 @@ from fxpmath import Fxp
 import pyrtlnet.wire_matrix_2d as wire_matrix_2d
 from pyrtlnet.wire_matrix_2d import WireMatrix2D
 
+from pyrtl.rtllib.pyrtlfloat import Float32Operations
+
 
 def make_input_memblock_data(
     a: np.ndarray, input_bitwidth: int, addrwidth: int
@@ -65,7 +67,11 @@ def make_input_memblock_data(
             if cycle < row or cycle >= row + num_inner:
                 data[cycle][row] = 0
             else:
-                data[cycle][row] = a[row][cycle - row]
+                if isinstance(a.dtype.type(), np.floating):
+                    val = int.from_bytes(a[row][cycle - row].tobytes(), byteorder='little', signed=False)
+                else:
+                    val = int(a[row][cycle - row])
+                data[cycle][row] = val
 
     # Pack the per-cycle data into memblock_data.
     memblock_data = [None for _ in range(num_cycles)]
@@ -210,6 +216,7 @@ def make_systolic_array(
     input_bitwidth: int,
     accumulator_bitwidth: int,
     initial_delay_cycles: int = 0,
+    quantized: bool = True,
 ) -> WireMatrix2D:
     """Generate an output-stationary systolic array, computing ``a ⋅ (b - b_zero)``.
 
@@ -437,16 +444,25 @@ def make_systolic_array(
         accumulator = pyrtl.Register(
             bitwidth=accumulator_bitwidth, name=f"{name}.pe[{row}][{column}]"
         )
-        accumulator.next <<= pyrtl.select(
-            reset,
-            0,
-            pyrtl.signed_add(
+        if quantized:
+            add_result = pyrtl.signed_add(
                 accumulator,
                 # q1 * (q2 - z2) == (q1 * q2) - (q1 * z2)
                 pyrtl.signed_mult(
                     tile_out.right, pyrtl.signed_sub(tile_out.bottom, b_zero_const)
                 ),
-            ),
+            )
+        else:
+            add_result = Float32Operations.add(
+                accumulator,
+                Float32Operations.mul(
+                    tile_out.right, tile_out.bottom
+                ),
+            )
+        accumulator.next <<= pyrtl.select(
+            reset,
+            0,
+            add_result
         )
         return accumulator
 
@@ -489,11 +505,12 @@ def make_systolic_array(
         )
         return (tile_out, accumulator)
 
-    # If b_zero is a length-1 vector, convert it to an integer.
-    if not isinstance(b_zero, int):
-        assert len(b_zero) == 1
-        b_zero = b_zero[0]
-    b_zero_const = pyrtl.Const(b_zero, signed=True, bitwidth=input_bitwidth)
+    if b_zero is not None:
+        # If b_zero is a length-1 vector, convert it to an integer.
+        if not isinstance(b_zero, int):
+            assert len(b_zero) == 1
+            b_zero = b_zero[0]
+        b_zero_const = pyrtl.Const(b_zero, signed=True, bitwidth=input_bitwidth)
 
     # ``done_next_cycle`` is high when the matrix multiplication is one cycle away from
     # completion. We need to know one cycle ahead to update ``state``.
@@ -669,6 +686,7 @@ def make_elementwise_add(
     a: WireMatrix2D,
     b: WireMatrix2D,
     output_bitwidth: int,
+    quantized: bool = True,
 ) -> WireMatrix2D:
     """Combinationally add matricies ``a`` and ``b`` elementwise.
 
@@ -688,9 +706,14 @@ def make_elementwise_add(
 
     for row in range(num_rows):
         for column in range(num_columns):
-            sums[row][column] = pyrtl.signed_add(
+            if quantized:
+                sums[row][column] = pyrtl.signed_add(
                 a[row][column], b[row][column]
-            ).truncate(output_bitwidth)
+                ).truncate(output_bitwidth)
+            else:
+                sums[row][column] = Float32Operations.add(
+                    a[row][column], b[row][column]
+                )
 
     # Combinational adder is always ready for input.
     a.ready <<= True
@@ -881,7 +904,7 @@ def make_elementwise_normalize(
     )
 
 
-def make_argmax(a: WireMatrix2D) -> pyrtl.WireVector:
+def make_argmax(a: WireMatrix2D, quantized: bool) -> pyrtl.WireVector:
     """Combinationally argmax a signed single-column matrix ``a``.
 
     This implementation is fully combinational (no registers).
@@ -917,9 +940,20 @@ def make_argmax(a: WireMatrix2D) -> pyrtl.WireVector:
 
     def argmax2(a: EnumeratedValue, b: EnumeratedValue) -> EnumeratedValue:
         """Two-input argmax."""
-        return EnumeratedValue(
-            EnumeratedValue=pyrtl.select(pyrtl.signed_gt(a.value, b.value), a, b)
-        )
+
+        if quantized:
+            return EnumeratedValue(
+                EnumeratedValue=pyrtl.select(
+                    pyrtl.signed_gt(a.value, b.value), a, b
+                )
+            )
+        else:
+            return EnumeratedValue(
+                # there is no built-in float comparison, so we use subtraction
+                EnumeratedValue=pyrtl.select(
+                    Float32Operations.sub(a.value, b.value)[-1] == 0, a, b
+                )
+            )
 
     # Compose two-input argmaxes into a wider argmax that accepts ``num_rows`` inputs.
     argmax = argmax2(enumerated_values[0], enumerated_values[1])
@@ -929,15 +963,22 @@ def make_argmax(a: WireMatrix2D) -> pyrtl.WireVector:
     return argmax.row
 
 
+import numpy as np
+import pyrtl
+
 def minimum_bitwidth(a: np.ndarray) -> int:
     """Return the minimum number of bits needed to represent each element in ``a``.
 
-    :param a: Array to process. ``a`` may contain negative numbers, so this ensures
-        there are enough bits to represent both the largest and smallest values.
-    :returns: The number of bits needed to represent the largest or smallest element in
-        ``a``.
+    If ``a`` is a float array, returns the bit size of the dtype (e.g., 32 for float32).
+    Otherwise, determines the minimum integer bitwidth needed to represent
+    all values in ``a`` (including negatives).
 
+    :param a: Array to process.
+    :returns: The number of bits needed to represent the largest/smallest element in ``a``.
     """
+    if np.issubdtype(a.dtype, np.floating):
+        return a.dtype.itemsize * 8  # e.g., float32 -> 32 bits, float64 -> 64 bits
+
     max_bitwidth = pyrtl.infer_val_and_bitwidth(np.max(a), signed=True).bitwidth
     min_bitwidth = pyrtl.infer_val_and_bitwidth(np.min(a), signed=True).bitwidth
     return max(max_bitwidth, min_bitwidth)

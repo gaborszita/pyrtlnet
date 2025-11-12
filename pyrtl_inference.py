@@ -9,6 +9,7 @@ from pyrtlnet.inference_util import (
     display_image,
     display_outputs,
     quantized_model_prefix,
+    unquantized_model_prefix
 )
 from pyrtlnet.pyrtl_inference import PyRTLInference
 
@@ -38,19 +39,20 @@ def main() -> None:
     test_images = mnist_test_data.get("test_images")
     test_labels = mnist_test_data.get("test_labels")
 
-    tensor_file = pathlib.Path(args.tensor_path) / f"{quantized_model_prefix}.npz"
+    tensor_file = pathlib.Path(args.tensor_path) / f"{unquantized_model_prefix}.npz"
     if not tensor_file.exists():
         sys.exit(f"{tensor_file} not found. Run tensorflow_training.py first.")
 
     # Create PyRTL inference hardware.
-    input_bitwidth = 8
+    input_bitwidth = 32
     accumulator_bitwidth = 32
     pyrtl_inference = PyRTLInference(
-        quantized_model_name=tensor_file,
+        model_name=tensor_file,
         input_bitwidth=input_bitwidth,
         accumulator_bitwidth=accumulator_bitwidth,
         axi=args.axi,
         initial_delay_cycles=args.initial_delay_cycles,
+        quantized=False,
     )
 
     correct = 0

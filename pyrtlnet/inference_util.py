@@ -16,6 +16,7 @@ metadata to a NumPy ``.npz`` file, which is easier to work with than the ``.tfli
 file. The ``.npz`` file can be loaded with :class:`.SavedTensors`.
 """
 quantized_model_prefix = "quantized"
+unquantized_model_prefix = "unquantized"
 
 
 def normalization_constants(
@@ -186,6 +187,50 @@ class SavedTensors:
             self.layer.append(current_layer)
             input_scale = current_layer.scale
 
+class FloatLayer:
+    """Stores a layer's weights and biases.
+    """
+
+    weight: np.ndarray
+    """The layer's quantized weight."""
+
+    bias: np.ndarray
+    """The layer's quantized bias."""
+
+    def __init__(
+        self,
+        weight: np.ndarray,
+        bias: np.ndarray,
+    ) -> None:
+        """Store a layer's weights and biases.
+
+        :param weight: The layer's weight.
+        :param bias: The layer's bias.
+        """
+        self.weight = weight
+        self.bias = bias
+
+
+class SavedTensorsFloat:
+    """
+    Loads weights and biases saved by :func:`.save_tensors_float`.
+    """
+
+    layer: list[QuantizedLayer]
+    """List of :class:`QuantizedLayer` containing per-layer weights, biases, and
+    quantization metadata.
+    """
+
+    def __init__(self, quantized_model_name: str) -> None:
+        tensors = np.load(quantized_model_name)
+
+        self.layer = []
+        for layer in range(2):
+            current_layer = FloatLayer(
+                weight=tensors.get(f"layer{layer}.weight"),
+                bias=tensors.get(f"layer{layer}.bias"),
+            )
+            self.layer.append(current_layer)
 
 def _set_fg(r: int, g: int, b: int) -> str:
     """Return terminal escape codes to set the foreground color to ``{r, g, b}``.
@@ -285,7 +330,7 @@ def _bar(
     else:
         padding = negative_bar_length
 
-    bar = " " * padding + "▄" * bar_length
+    bar = " " * padding + "▄" * 1
     green = _set_fg(0x2C, 0xA0, 0x2C)
     red = _set_fg(0xD6, 0x27, 0x28)
     if expected == actual and actual == index:

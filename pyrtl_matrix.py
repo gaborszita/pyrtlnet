@@ -27,7 +27,7 @@ def _make_np_matrix(shape: tuple[int, int], start: int) -> np.ndarray:
 
     """
     num_rows, num_columns = shape
-    array = np.array(list(range(start, start + num_rows * num_columns)))
+    array = np.array(list(range(start, start + num_rows * num_columns)), dtype=np.float32)
     return np.reshape(array, newshape=shape)
 
 
@@ -109,6 +109,7 @@ def main() -> None:
         input_bitwidth=input_bitwidth,
         accumulator_bitwidth=accumulator_bitwidth,
         initial_delay_cycles=args.initial_delay_cycles,
+        quantized=False,
     )
     matrix_xy.make_outputs("matrix_xy")
 
@@ -136,8 +137,8 @@ def main() -> None:
 
     # Print the waveform.
     print("Computing x · (y - y_zero)")
-    print(f"x (left) shape={x.shape}:\n{x}")
-    print(f"y (top) shape={y.shape}:\n{y}")
+    print(f"x (left) shape={x.shape}:\n{x} dtype={x.dtype}")
+    print(f"y (top) shape={y.shape}:\n{y} dtype={y.dtype}")
     print("y_zero:", y_zero)
     _render_trace(
         sim=sim,

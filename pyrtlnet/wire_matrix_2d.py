@@ -113,7 +113,12 @@ class WireMatrix2D:
             for row in values:
                 assert len(row) == num_columns
                 if isinstance(row, np.ndarray):
-                    rows.append(self.Row(values=[value.item() for value in row]))
+                    rows.append(self.Row(values=[
+                        int.from_bytes(value.tobytes(), byteorder='little', signed=False)
+                        if isinstance(value, np.floating)
+                        else value.item()
+                        for value in row
+                    ]))
                 else:
                     rows.append(self.Row(values=row))
             self.matrix = self.Matrix(name=name, values=rows)

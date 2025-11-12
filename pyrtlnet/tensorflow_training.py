@@ -61,11 +61,15 @@ import tensorflow_model_optimization as tfmot
 from ai_edge_litert.interpreter import Interpreter
 from tensorflow_model_optimization.python.core.keras.compat import keras
 
-from pyrtlnet.training_util import save_tensors
+from pyrtlnet.training_util import save_tensors, save_tensors_float
 
 
 def train_unquantized_model(
-    learning_rate: float, epochs: int, train_images: tf.Tensor, train_labels: tf.Tensor
+    learning_rate: float,
+    epochs: int,
+    train_images: tf.Tensor,
+    train_labels: tf.Tensor,
+    unquantized_model_prefix: str
 ) -> keras.Model:
     """Train an unquantized, two-layer, dense MNIST neural network model.
 
@@ -101,6 +105,19 @@ def train_unquantized_model(
     )
 
     model.fit(train_images, train_labels, epochs=epochs)
+
+    if unquantized_model_prefix is not None:
+        # Convert the Keras model to unquantized TFLite
+        converter = tf.lite.TFLiteConverter.from_keras_model(model)  # your original Keras model
+        tflite_model = converter.convert()
+
+        # Save the unquantized model
+        tflite_model_file = pathlib.Path(".") / f"{unquantized_model_prefix}.tflite"
+        tflite_model_file.write_bytes(tflite_model)
+
+        # Save the model's tensors to a NumPy .npz file
+        interpreter = tf.lite.Interpreter(model_path=str(tflite_model_file))
+        save_tensors_float(interpreter=interpreter, unquantized_model_prefix=unquantized_model_prefix)
 
     return model
 
