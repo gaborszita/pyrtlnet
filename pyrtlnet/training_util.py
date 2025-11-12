@@ -131,27 +131,27 @@ def save_tensors_float(interpreter: Interpreter, unquantized_model_prefix: str) 
     # tensor 5: reshape shape  int32[2]
     # tensor 6: reshape output int8[1, 144]
     #
-    # tensor 2: layer 0 weight int8[18, 144]
-    # tensor 3: layer 0 bias   int32[18]
+    # tensor 4: layer 0 weight int8[18, 144]
+    # tensor 1: layer 0 bias   int32[18]
     # tensor 7: layer 0 output int8[1, 18]
     #
-    # tensor 1: layer 1 weight int8[10, 18]
-    # tensor 4: layer 1 bias   int32[10]
+    # tensor 3: layer 1 weight int8[10, 18]
+    # tensor 2: layer 1 bias   int32[10]
     # tensor 8: layer 1 output int8[1, 10]
 
     _get_layer_tensors_unquantized(
         interpreter=interpreter,
         layer_name="layer0",
-        weight_index=2,
-        bias_index=3,
+        weight_index=4,
+        bias_index=1,
         output_index=7,
         tensors=tensors,
     )
     _get_layer_tensors_unquantized(
         interpreter=interpreter,
         layer_name="layer1",
-        weight_index=1,
-        bias_index=4,
+        weight_index=3,
+        bias_index=2,
         output_index=8,
         tensors=tensors,
     )

@@ -459,17 +459,17 @@ class PyRTLInference:
                                 pyrtl_axi.simulate_axi_lite_read(
                                     sim, provided_inputs, address=addr
                                 ),
-                                bitwidth=8,
+                                bitwidth=32,
                             )
                         ]
                     )
-                return np.array(outputs, dtype=np.int8)
+                return np.array(outputs, dtype=np.int32)
 
             # Registers 1-18 hold the layer0's outputs, and registers 19-28 hold
             # layer1's outputs. Each register is 32-bits wide, and AXI addresses are
             # byte addresses.
-            layer0_output = retrieve_layer_outputs(start=1 * 4, end=19 * 4)
-            layer1_output = retrieve_layer_outputs(start=19 * 4, end=29 * 4)
+            layer0_output = retrieve_layer_outputs(start=1 * 4, end=19 * 4).astype('int32').view('float32')
+            layer1_output = retrieve_layer_outputs(start=19 * 4, end=29 * 4).astype('int32').view('float32')
 
             # Read the argmax via AXI-Lite. The sum is stored in AXI register 0.
             argmax = pyrtl_axi.simulate_axi_lite_read(sim, provided_inputs, address=0)
