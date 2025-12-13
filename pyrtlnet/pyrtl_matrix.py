@@ -217,6 +217,7 @@ def make_systolic_array(
     accumulator_bitwidth: int,
     initial_delay_cycles: int = 0,
     quantized: bool = True,
+    reset: pyrtl.WireVector | None = None,
 ) -> WireMatrix2D:
     """Generate an output-stationary systolic array, computing ``a ⋅ (b - b_zero)``.
 
@@ -522,8 +523,9 @@ def make_systolic_array(
     counter = pyrtl.Register(bitwidth=counter_bitwidth)
     counter.name = f"{name}.counter"
 
-    reset = pyrtl.WireVector(bitwidth=1, name=f"{name}.reset")
-    reset <<= counter == 0
+    if reset is None:
+        reset = pyrtl.WireVector(bitwidth=1, name=f"{name}.reset")
+        reset <<= counter == 0
 
     def process_input(
         a: WireMatrix2D | np.ndarray, name: str
@@ -639,6 +641,8 @@ def make_systolic_array(
         bitwidth=pyrtl.infer_val_and_bitwidth(initial_delay_cycles).bitwidth,
     )
     with pyrtl.conditional_assignment:
+        with reset:
+            counter.next |= 0
         # Reset the counter in the INIT state when input is invalid. If the input is
         # valid, the counter is incremented so computation can begin in the next cycle.
         with ((state == State.INIT) & (~valid | initial_delay_cycles != 0)) | (
@@ -654,14 +658,18 @@ def make_systolic_array(
 
     # Update current state.
     with pyrtl.conditional_assignment:
+        with reset:
+            product.valid |= False
+            state.next |= State.INIT
         with state == State.INIT:
             # We're using ordinary Python ``if`` statements within a
             # ``pyrtl.conditional_assignment`` because we need to generate different
             # logic depending on which inputs are constants.
-            if a_is_wire_matrix_2d:
-                a.ready |= True
-            if b_is_wire_matrix_2d:
-                b.ready |= True
+            #if a_is_wire_matrix_2d:
+            #    a.ready |= True
+            #if b_is_wire_matrix_2d:
+            #    b.ready |= True
+            product.valid |= False
 
             with valid:
                 if initial_delay_cycles == 0:
@@ -669,11 +677,13 @@ def make_systolic_array(
                 else:
                     state.next |= State.WAIT
         with state == State.WAIT:
+            product.valid |= False
             with init_counter == max(0, initial_delay_cycles - 1):
                 state.next |= State.BUSY
             with pyrtl.otherwise:
                 init_counter.next |= init_counter + 1
         with (state == State.BUSY) & done_next_cycle:
+            product.valid |= False
             state.next |= State.DONE
         with state == State.DONE:
             product.valid |= True
@@ -716,8 +726,8 @@ def make_elementwise_add(
                 )
 
     # Combinational adder is always ready for input.
-    a.ready <<= True
-    b.ready <<= True
+    #a.ready <<= True
+    #b.ready <<= True
     # Combinational adder's output is valid when both inputs are valid.
     return WireMatrix2D(
         values=sums,
@@ -727,6 +737,50 @@ def make_elementwise_add(
         valid=a.valid & b.valid,
     )
 
+def make_elementwise_sub(
+    name: str,
+    a: WireMatrix2D,
+    b: WireMatrix2D,
+    output_bitwidth: int,
+    quantized: bool = True,
+) -> WireMatrix2D:
+    """Combinationally subtract matrices ``a - b`` elementwise.
+
+    This implementation is fully combinational (no registers).
+
+    :param name: The returned :class:`.WireMatrix2D` will be named ``{name}.output``.
+    :param a:
+    :param b:
+    :returns: :class:`.WireMatrix2D` containing a - b.
+    """
+    assert a.shape == b.shape
+    num_rows, num_columns = a.shape
+
+    # Collect a 2D array of differences.
+    diffs = [[None for column in range(num_columns)] for row in range(num_rows)]
+
+    for row in range(num_rows):
+        for column in range(num_columns):
+            if quantized:
+                diffs[row][column] = pyrtl.signed_sub(
+                    a[row][column], b[row][column]
+                ).truncate(output_bitwidth)
+            else:
+                diffs[row][column] = Float32Operations.sub(
+                    a[row][column], b[row][column]
+                )
+
+    # Combinational subtractor is always ready for input.
+    #a.ready <<= True
+    #b.ready <<= True
+    # Combinational subtractor's output is valid when both inputs are valid.
+    return WireMatrix2D(
+        values=diffs,
+        shape=a.shape,
+        bitwidth=output_bitwidth,
+        name=f"{name}.output",
+        valid=a.valid & b.valid,
+    )
 
 def make_elementwise_relu(name: str, a: WireMatrix2D) -> WireMatrix2D:
     """Combinationally ReLU matrix ``a``. This computes ``max(a, 0)`` elementwise.
@@ -751,7 +805,7 @@ def make_elementwise_relu(name: str, a: WireMatrix2D) -> WireMatrix2D:
             outputs[row][column] = pyrtl.select(current_a[-1], 0, current_a)
 
     # Combinational relu is always ready for input.
-    a.ready <<= True
+    #a.ready <<= True
     # Combinational relu's output is valid when its input is valid.
     return WireMatrix2D(
         values=outputs,
@@ -894,7 +948,7 @@ def make_elementwise_normalize(
             ).truncate(output_bitwidth)
 
     # Combinational normalize is always ready for input.
-    a.ready <<= True
+    #a.ready <<= True
     return WireMatrix2D(
         values=outputs,
         shape=a.shape,
@@ -922,7 +976,7 @@ def make_argmax(a: WireMatrix2D, quantized: bool) -> pyrtl.WireVector:
     row_bitwidth = pyrtl.infer_val_and_bitwidth(num_rows).bitwidth
 
     # Combinational argmax is always ready for input.
-    a.ready <<= True
+    #a.ready <<= True
 
     if num_rows == 1:
         return pyrtl.Const(val=0)

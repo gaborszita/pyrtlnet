@@ -133,7 +133,7 @@ class WireMatrix2D:
                 self.matrix[row].name = pyrtl.wire.next_tempvar_name()
 
         def create_ready_valid(
-            value: bool | pyrtl.WireVector, suffix: str
+            value: bool | pyrtl.WireVector, suffix: str, ready: bool
         ) -> pyrtl.WireVector:
             """Return a 1-bit ready or valid wire. Create one if necessary."""
             output_name = ""
@@ -141,6 +141,8 @@ class WireMatrix2D:
                 output_name = f"{name}{suffix}"
             if value is None:
                 output = pyrtl.WireVector(name=output_name, bitwidth=1)
+                if ready:
+                    output <<= True
             else:
                 output = pyrtl.as_wires(value)
                 assert output.bitwidth == 1
@@ -149,8 +151,10 @@ class WireMatrix2D:
             return output
 
         # Set up ready and valid signals.
-        self.ready = create_ready_valid(value=ready, suffix=".ready")
-        self.valid = create_ready_valid(value=valid, suffix=".valid")
+        self.ready = create_ready_valid(value=ready, suffix=".ready", ready=True)
+        self.valid = create_ready_valid(value=valid, suffix=".valid", ready=False)
+
+        self.transpose_my: WireMatrix2D | None = None
 
     def __getitem__(self, row: pyrtl.WireVector) -> pyrtl.WireVector:
         """Implements ``WireMatrix2D``'s ``[]`` operator.
@@ -192,6 +196,8 @@ class WireMatrix2D:
 
         :returns: A transposed version of ``self``.
         """
+        if self.transpose_my is not None:
+            return self.transpose_my
         num_rows, num_columns = self.shape
         if self.memblock is not None:
             outputs = self.memblock
@@ -205,7 +211,7 @@ class WireMatrix2D:
                 for column in range(num_columns):
                     outputs[column][row] = self[row][column]
 
-        return WireMatrix2D(
+        self.transpose_my = WireMatrix2D(
             values=outputs,
             shape=(num_columns, num_rows),
             bitwidth=self.bitwidth,
@@ -213,6 +219,7 @@ class WireMatrix2D:
             ready=self.ready,
             valid=self.valid,
         )
+        return self.transpose_my
 
     def make_outputs(self, output_name: str) -> None:
         """Create :class:`~pyrtl.Output` ``WireVectors`` for ``self``.

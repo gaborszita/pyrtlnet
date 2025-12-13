@@ -55,7 +55,7 @@ class TestPyRTLInference(unittest.TestCase):
         outputs from each layer.
         """
         pyrtl_inference = PyRTLInference(
-            quantized_model_name=str(self.quantized_model_prefix) + ".npz",
+            model_name=str(self.quantized_model_prefix) + ".npz",
             input_bitwidth=8,
             accumulator_bitwidth=32,
             axi=False,
@@ -95,7 +95,7 @@ class TestPyRTLInference(unittest.TestCase):
         outputs from each layer.
         """
         pyrtl_inference = PyRTLInference(
-            quantized_model_name=str(self.quantized_model_prefix) + ".npz",
+            model_name=str(self.quantized_model_prefix) + ".npz",
             input_bitwidth=8,
             accumulator_bitwidth=32,
             axi=True,
