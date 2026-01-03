@@ -22,7 +22,7 @@ from fxpmath import Fxp
 import pyrtlnet.wire_matrix_2d as wire_matrix_2d
 from pyrtlnet.wire_matrix_2d import WireMatrix2D
 
-from pyrtl.rtllib.pyrtlfloat import Float32Operations
+from pyrtl.rtllib.pyrtlfloat import Float16Operations
 
 
 def make_input_memblock_data(
@@ -454,9 +454,9 @@ def make_systolic_array(
                 ),
             )
         else:
-            add_result = Float32Operations.add(
+            add_result = Float16Operations.add(
                 accumulator,
-                Float32Operations.mul(
+                Float16Operations.mul(
                     tile_out.right, tile_out.bottom
                 ),
             )
@@ -721,7 +721,7 @@ def make_elementwise_add(
                 a[row][column], b[row][column]
                 ).truncate(output_bitwidth)
             else:
-                sums[row][column] = Float32Operations.add(
+                sums[row][column] = Float16Operations.add(
                     a[row][column], b[row][column]
                 )
 
@@ -766,7 +766,7 @@ def make_elementwise_sub(
                     a[row][column], b[row][column]
                 ).truncate(output_bitwidth)
             else:
-                diffs[row][column] = Float32Operations.sub(
+                diffs[row][column] = Float16Operations.sub(
                     a[row][column], b[row][column]
                 )
 
@@ -1005,7 +1005,7 @@ def make_argmax(a: WireMatrix2D, quantized: bool) -> pyrtl.WireVector:
             return EnumeratedValue(
                 # there is no built-in float comparison, so we use subtraction
                 EnumeratedValue=pyrtl.select(
-                    Float32Operations.sub(a.value, b.value)[-1] == 0, a, b
+                    Float16Operations.sub(a.value, b.value)[-1] == 0, a, b
                 )
             )
 

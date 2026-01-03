@@ -27,7 +27,8 @@ def _make_np_matrix(shape: tuple[int, int], start: int) -> np.ndarray:
 
     """
     num_rows, num_columns = shape
-    array = np.array(list(range(start, start + num_rows * num_columns)), dtype=np.float32)
+    #array = np.array(list(range(start, start + num_rows * num_columns)), dtype=np.float16)
+    array = np.array(list(range(start, start + num_rows * num_columns)))
     return np.reshape(array, newshape=shape)
 
 
@@ -109,7 +110,7 @@ def main() -> None:
         input_bitwidth=input_bitwidth,
         accumulator_bitwidth=accumulator_bitwidth,
         initial_delay_cycles=args.initial_delay_cycles,
-        quantized=False,
+        quantized=True,
     )
     matrix_xy.make_outputs("matrix_xy")
 
@@ -121,7 +122,7 @@ def main() -> None:
         name="add0", a=matrix_xy, b=matrix_a, output_bitwidth=accumulator_bitwidth
     )
     matrix_xya.make_outputs("matrix_xya")
-    matrix_xya.ready <<= True
+    #matrix_xya.ready <<= True
 
     # Provide the initial data for ``y_memblock``.
     memblock_data = pyrtl_matrix.make_input_memblock_data(

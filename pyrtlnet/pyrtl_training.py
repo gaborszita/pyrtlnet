@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from enum import Enum
 import pyrtl
-from pyrtl.rtllib.pyrtlfloat import Float32Operations
+from pyrtl.rtllib.pyrtlfloat import Float16Operations
 
 from pyrtlnet.wire_matrix_2d import WireMatrix2D
 from . import pyrtl_matrix
@@ -48,7 +48,7 @@ class PyrtlTraining:
     upstream_gradient = loss.make_backward(reset=reset)
     for layer in reversed(layers[:-1]):
       upstream_gradient = layer.make_backward(upstream_gradient, reset=reset)
-    learning_rate = pyrtl.Const(np.float32(0.01).view(np.uint32), bitwidth=self.bitwidth)
+    learning_rate = pyrtl.Const(np.float16(0.001).view(np.uint16), bitwidth=self.bitwidth)
     layer_0_weight.make_update(learning_rate)
     layer_0_bias.make_update(learning_rate)
     layer_1_weight.make_update(learning_rate)
@@ -64,7 +64,7 @@ class PyrtlTraining:
     valid_backward <<= upstream_gradient.valid
   
   def simulate(self, flat_image: np.ndarray) -> None:
-    flat_image = np.reshape(flat_image, newshape=(144, 1)).view(np.int32)
+    flat_image = np.reshape(flat_image, newshape=(144, 1)).astype(np.float16).view(np.uint16)
     memblock_data = pyrtl_matrix.make_input_memblock_data(
       flat_image.transpose(),
       self.bitwidth,
@@ -73,7 +73,7 @@ class PyrtlTraining:
 
     memblock_data_dict = dict(enumerate(memblock_data))
     print("fastsim start")
-    sim = pyrtl.CompiledSimulation(
+    sim = pyrtl.FastSimulation(
       memory_value_map={self.flat_image_memblock: memblock_data_dict}
     )
     print("fastsim done")
@@ -81,57 +81,49 @@ class PyrtlTraining:
     for input in self.inputs:
       if input.startswith("weight_init_"):
         value = np.random.randn() * 0.1
-        self.inputs[input] = np.float32(value).view(np.uint32)
+        self.inputs[input] = np.float16(value).view(np.uint16)
     
     self.inputs["reset"] = 0
 
     self.inputs["training_state"] = TrainingState.INIT_WEIGHTS.value
     sim.step(provided_inputs=self.inputs)
     
-    self.inputs["training_state"] = TrainingState.FORWARD.value
-    done = False
-    cycle_count = 0
-    while not done:
-      print(f"Cycle {cycle_count}")
+    for epoch in range(10):
+      print(f"Epoch {epoch}")
+      self.inputs["training_state"] = TrainingState.FORWARD.value
+      done = False
+      cycle_count = 0
+      while not done:
+        #print(f"Cycle {cycle_count}")
+        sim.step(provided_inputs=self.inputs)
+        done = sim.inspect("valid")
+        cycle_count += 1
+      print(f"Forward pass done in {cycle_count} cycles")
+      print(np.uint16(sim.inspect("loss_output")).view(np.float16))
+      #layer_0_weight_output = np.array([
+      #  sim.inspect(f"layer_0_weight_out_{r}_0") for r in range(18)
+      #])
+      #print("Layer 0 weight output:", layer_0_weight_output)
+
+      self.inputs["reset"] = 1
       sim.step(provided_inputs=self.inputs)
-      done = sim.inspect("valid")
-      cycle_count += 1
-    print(f"Forward pass done in {cycle_count} cycles")
-    print(np.uint32(sim.inspect("loss_output")).view(np.float32))
-    #layer_0_weight_output = np.array([
-    #  sim.inspect(f"layer_0_weight_out_{r}_0") for r in range(18)
-    #])
-    #print("Layer 0 weight output:", layer_0_weight_output)
+      self.inputs["reset"] = 0
 
-    self.inputs["reset"] = 1
-    sim.step(provided_inputs=self.inputs)
-    self.inputs["reset"] = 0
+      self.inputs["training_state"] = TrainingState.BACKWARD.value
+      done = False
+      cycle_count = 0
+      while not done:
+        sim.step(provided_inputs=self.inputs)
+        done = sim.inspect("valid_backward")
+        cycle_count += 1
+      print(f"Backward pass done in {cycle_count} cycles")
 
-    self.inputs["training_state"] = TrainingState.BACKWARD.value
-    done = False
-    cycle_count = 0
-    while not done:
+      self.inputs["training_state"] = TrainingState.UPDATE.value
       sim.step(provided_inputs=self.inputs)
-      done = sim.inspect("valid_backward")
-      cycle_count += 1
-    print(f"Backward pass done in {cycle_count} cycles")
 
-    self.inputs["training_state"] = TrainingState.UPDATE.value
-    sim.step(provided_inputs=self.inputs)
-
-    self.inputs["reset"] = 1
-    sim.step(provided_inputs=self.inputs)
-    self.inputs["reset"] = 0
-
-    self.inputs["training_state"] = TrainingState.FORWARD.value
-    done = False
-    cycle_count = 0
-    while not done:
+      self.inputs["reset"] = 1
       sim.step(provided_inputs=self.inputs)
-      done = sim.inspect("valid")
-      cycle_count += 1
-    print(f"Second forward pass done in {cycle_count} cycles")
-    print(np.uint32(sim.inspect("loss_output")).view(np.float32))
+      self.inputs["reset"] = 0
   
   def _make_input_memblock(self) -> None:
     """Build the MemBlock that will hold the input image data."""
@@ -263,8 +255,8 @@ class ProductNode(Node):
   def make_update(self, learning_rate):
     for r in range(self.shape[0]):
       for c in range(self.shape[1]):
-        grad_term = Float32Operations.mul(learning_rate, self.weight_gradient[r][c])
-        self.update_regs[r][c].next <<= Float32Operations.sub(
+        grad_term = Float16Operations.mul(learning_rate, self.weight_gradient[r][c])
+        self.update_regs[r][c].next <<= Float16Operations.sub(
           self.regs[r][c], grad_term
         )
 
@@ -286,8 +278,8 @@ class BiasNode(Node):
   def make_update(self, learning_rate):
     for r in range(self.shape[0]):
       for c in range(self.shape[1]):
-        grad_term = Float32Operations.mul(learning_rate, self.gradient[r][c])
-        self.update_regs[r][c].next <<= Float32Operations.sub(
+        grad_term = Float16Operations.mul(learning_rate, self.gradient[r][c])
+        self.update_regs[r][c].next <<= Float16Operations.sub(
           self.regs[r][c], grad_term
         )
 
@@ -307,15 +299,15 @@ class ReluNode(Node):
     # Compute gradient of ReLU using sign bit of (input - 0.0).
     rows, cols = self.input.shape
 
-    # Constant zero as float32 bitpattern
-    zero_f32 = np.float32(0.0).view(np.uint32)
-    zero_const = pyrtl.Const(zero_f32, bitwidth=self.bitwidth)
+    # Constant zero as float16 bitpattern
+    zero_f16 = np.float16(0.0).view(np.uint16)
+    zero_const = pyrtl.Const(zero_f16, bitwidth=self.bitwidth)
 
     grad_values = []
     for r in range(rows):
       grad_row = []
       for c in range(cols):
-        cond = self.input[r][c][31] == 0
+        cond = self.input[r][c][15] == 0
         grad_elem = pyrtl.select(cond, upstream_gradient[r][c], zero_const)
         grad_row.append(grad_elem)
       grad_values.append(grad_row)
@@ -362,7 +354,7 @@ class Loss(Node):
     # Elementwise square: create a matrix of diff * diff using PyrtlFloat.mul
     rows, cols = diff.shape
     squared_values = [
-      [Float32Operations.mul(diff[r][c], diff[r][c]) for c in range(cols)]
+      [Float16Operations.mul(diff[r][c], diff[r][c]) for c in range(cols)]
       for r in range(rows)
     ]
     squared = WireMatrix2D(
@@ -378,14 +370,14 @@ class Loss(Node):
     acc = pyrtl.Const(0, bitwidth=self.bitwidth)
     for r in range(rows):
       for c in range(cols):
-        acc = Float32Operations.add(acc, squared_values[r][c])
+        acc = Float16Operations.add(acc, squared_values[r][c])
 
     # Divide by number of elements to compute mean (MSE)
     n = rows * cols
     reciprocal_value = 1.0 / n
-    reciprocal_const = np.float32(reciprocal_value).view(np.uint32)
+    reciprocal_const = np.float16(reciprocal_value).view(np.uint16)
     reciprocal_const = pyrtl.Const(reciprocal_const, bitwidth=self.bitwidth)
-    loss = Float32Operations.mul(acc, reciprocal_const)
+    loss = Float16Operations.mul(acc, reciprocal_const)
 
     loss_matrix = WireMatrix2D(
       values=[[loss]],
@@ -404,11 +396,11 @@ class Loss(Node):
 
   def make_backward(self, reset):
     div_value = 2.0 / self.n
-    div_value = np.float32(div_value).view(np.uint32)
+    div_value = np.float16(div_value).view(np.uint16)
     div_value = pyrtl.Const(div_value, bitwidth=self.bitwidth)
     rows, cols = self.diff.shape
     grad_values = [
-      [Float32Operations.mul(self.diff[r][c], div_value) for c in range(cols)]
+      [Float16Operations.mul(self.diff[r][c], div_value) for c in range(cols)]
       for r in range(rows)
     ]
     gradient = WireMatrix2D(
@@ -422,18 +414,16 @@ class Loss(Node):
 
 np.random.seed(42)
 
-bitwidth = 32
+bitwidth = 16
 
 print("Building PyrtlTraining...")
 pyrtl_training = PyrtlTraining(bitwidth=bitwidth)
 print("PyrtlTraining built.")
 
-exit()
-
-print("Generating Verilog...")
-with open("pyrtl_training.v", "w") as f:
-  pyrtl.output_to_verilog(f)
-print("Verilog generation done.")
+#print("Generating Verilog...")
+#with open("pyrtl_training.v", "w") as f:
+#  pyrtl.output_to_verilog(f)
+#print("Verilog generation done.")
 
 mnist_test_data_file = "./mnist_test_data.npz"
 # Load MNIST test data.
